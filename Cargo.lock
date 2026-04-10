@@ -2946,8 +2946,6 @@ dependencies = [
 [[package]]
 name = "prism2"
 version = "0.1.6"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "33376f9536f67658720bd15edba3d8756855095a3764eb284a5ed1601ed76902"
 dependencies = [
  "anyanymap",
  "downcast-rs 2.0.2",
@@ -3089,9 +3087,7 @@ checksum = "f8dcc9c7d52a811697d2151c701e0d08956f92b0e24136cf4cf27b57a6a0d9bf"
 
 [[package]]
 name = "ramp2"
-version = "0.1.7"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "193c8081192f380532a8ea1b76374a356121a4b0aad6d8367dddee8f2b7e0908"
+version = "0.1.6"
 dependencies = [
  "maverick_os",
  "prism2",
@@ -4597,8 +4593,6 @@ dependencies = [
 [[package]]
 name = "wgpu_canvas"
 version = "5.0.8"
-source = "registry+https://github.com/rust-lang/crates.io-index"
-checksum = "37deb8b3ff4088be909bea9666d1f58c50a95ba8300d5facd8a340465da43298"
 dependencies = [
  "bytemuck",
  "fontdue",

@@ -84,10 +84,14 @@ fn dir_from_angle(deg: f32) -> (f32, f32) {
 // ─────────────────────────────────────────────────────────────────────────────
 fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
     // ── Background starfield (viewport-sized, follows camera) ────────────
-    let bg_stars = star_field(VW as u32, VH as u32, 2000, 42);
+    // Slightly oversized so edges are never visible during camera lerp.
+    const BG_PAD: f32 = 60.0;
+    let bg_w = VW + BG_PAD * 2.0;
+    let bg_h = VH + BG_PAD * 2.0;
+    let bg_stars = star_field(bg_w as u32, bg_h as u32, 1800, 42);
     let bg = GameObject::build("bg")
         .image(bg_stars)
-        .size(VW, VH)
+        .size(bg_w, bg_h)
         .position(0.0, 0.0)
         .layer(0)
         .finish();
@@ -416,11 +420,21 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
     let scene = scene.on_enter({
         let state = state.clone();
         move |canvas| {
-            // Camera setup
+            // Camera setup — center_on snaps immediately so there is no
+            // lerp-from-origin artifact on the first frame.
             let mut cam = Camera::new((WORLD_W, WORLD_H), (VW, VH));
             cam.follow(Some(Target::name("player")));
             cam.lerp_speed = CAMERA_LERP;
+            cam.center_on(SPAWN_X, SPAWN_Y);
             canvas.set_camera(cam);
+
+            // Pin background to initial camera position so it is correct
+            // before the first tick update runs.
+            const BG_PAD: f32 = 60.0;
+            let init_cam = canvas.camera().map(|c| c.position).unwrap_or((0.0, 0.0));
+            if let Some(obj) = canvas.get_game_object_mut("bg") {
+                obj.position = (init_cam.0 - BG_PAD, init_cam.1 - BG_PAD);
+            }
 
             // Enable crystalline physics
             canvas.run(Action::enable_crystalline());
@@ -911,9 +925,12 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 }
 
                 // ── Pin background to camera ─────────────────────────────
+                // Offset by -BG_PAD so the oversized image stays centred on
+                // the viewport and edges are never visible.
+                const BG_PAD: f32 = 60.0;
                 let cam_pos = c.camera().map(|cam| cam.position).unwrap_or((0.0, 0.0));
                 if let Some(obj) = c.get_game_object_mut("bg") {
-                    obj.position = cam_pos;
+                    obj.position = (cam_pos.0 - BG_PAD, cam_pos.1 - BG_PAD);
                 }
 
                 // ── Update HUD ───────────────────────────────────────────
