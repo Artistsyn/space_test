@@ -605,9 +605,9 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 if c.key("q") {
                     s.rotation -= PLAYER_ROTATE_SPEED;
                 }
-                if c.key("e") {
+                if c.key("e") || c.key("r") {
                     s.rotation += PLAYER_ROTATE_SPEED;
-                }
+                }               
                 // Normalize to 0..360
                 s.rotation = ((s.rotation % 360.0) + 360.0) % 360.0;
 
@@ -615,19 +615,19 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 let (fwd_x, fwd_y) = dir_from_angle(s.rotation);
                 let (right_x, right_y) = (-fwd_y, fwd_x); // perpendicular CW (screen Y-down)
 
-                if c.key("w") {
+                if c.key("w") || c.key("up") {
                     s.vx += fwd_x * PLAYER_THRUST;
                     s.vy += fwd_y * PLAYER_THRUST;
                 }
-                if c.key("s") {
+                if c.key("s") || c.key("down") {
                     s.vx -= fwd_x * PLAYER_REVERSE;
                     s.vy -= fwd_y * PLAYER_REVERSE;
                 }
-                if c.key("d") {
+                if c.key("d") || c.key("right") {
                     s.vx += right_x * PLAYER_STRAFE;
                     s.vy += right_y * PLAYER_STRAFE;
                 }
-                if c.key("a") {
+                if c.key("a") || c.key("left") {
                     s.vx -= right_x * PLAYER_STRAFE;
                     s.vy -= right_y * PLAYER_STRAFE;
                 }
