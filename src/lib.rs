@@ -16,7 +16,6 @@ use std::sync::{Arc, Mutex};
 struct LaserState {
     alive: bool,
     age: u32,
-    /// rotation angle the laser was fired at (degrees)
     angle: f32,
 }
 
@@ -25,41 +24,29 @@ struct EnemyState {
     alive: bool,
     hull: f32,
     fire_cooldown: u32,
-    /// Current rotation in degrees
     rotation: f32,
 }
 
 #[derive(Clone)]
 struct State {
-    // player
     px: f32,
     py: f32,
     vx: f32,
     vy: f32,
-    rotation: f32,  // degrees, 0 = up
+    rotation: f32,
     hull: f32,
     shield: f32,
-    shield_regen_timer: u32,  // ticks since last hit; regen starts after SHIELD_REGEN_DELAY
+    shield_regen_timer: u32,
     fire_cooldown: u32,
     score: u32,
     ticks: u64,
-
-    // player lasers
     player_lasers: Vec<LaserState>,
-
-    // enemy lasers
     enemy_lasers: Vec<LaserState>,
-
-    // enemies
     enemies: Vec<EnemyState>,
-
-    // flags
     paused: bool,
     show_controls: bool,
     game_over: bool,
     show_gravity_debug: bool,
-
-    // seed for deterministic RNG
     seed: u64,
 }
 
@@ -73,18 +60,25 @@ fn lcg_range(s: &mut u64, lo: f32, hi: f32) -> f32 {
     lo + lcg(s) * (hi - lo)
 }
 
-/// Direction vector from rotation degrees (0 = up, CW positive)
 fn dir_from_angle(deg: f32) -> (f32, f32) {
     let rad = (deg - 90.0).to_radians();
     (rad.cos(), rad.sin())
+}
+
+fn make_text(text: String, font_size: f32, color: Color, align: Align) -> Text {
+    let font = Arc::new(Font::from_bytes(include_bytes!("../assets/font.ttf")).expect("font"));
+    Text::new(
+        vec![Span::new(text, font_size, Some(font_size * 1.35), font, color, 0.0)],
+        None,
+        align,
+        None,
+    )
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Build the main game scene
 // ─────────────────────────────────────────────────────────────────────────────
 fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
-    // ── Background starfield (viewport-sized, follows camera) ────────────
-    // Slightly oversized so edges are never visible during camera lerp.
     const BG_PAD: f32 = 60.0;
     let bg_w = VW + BG_PAD * 2.0;
     let bg_h = VH + BG_PAD * 2.0;
@@ -97,7 +91,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         .ignore_zoom()
         .finish();
 
-    // ── Player ───────────────────────────────────────────────────────────
     let player_img = Image {
         shape: prism::canvas::ShapeType::Rectangle(0.0, (PLAYER_W, PLAYER_H), 0.0),
         image: player_ship_img().into(),
@@ -116,14 +109,11 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         .layer(5)
         .finish();
 
-    // ── Planets ──────────────────────────────────────────────────────────
     let mut planet_objs: Vec<(String, GameObject)> = Vec::new();
     let mut grav_debug_objs: Vec<(String, GameObject)> = Vec::new();
     for p in PLANETS {
         let size = p.radius * 2.0;
-        let img = planet_atmosphere(
-            p.radius as u32, p.r, p.g, p.b, p.atmosphere, size,
-        );
+        let img = planet_atmosphere(p.radius as u32, p.r, p.g, p.b, p.atmosphere, size);
         let obj = GameObject::build(p.name)
             .image(img)
             .size(size, size)
@@ -137,7 +127,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
             .finish();
         planet_objs.push((p.name.to_string(), obj));
 
-        // Gravity debug ring — hidden by default, toggled with G
         let field_r = p.radius * GRAVITY_FIELD_MULT;
         let field_d = field_r * 2.0;
         let ring = glow_ring(
@@ -155,7 +144,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         grav_debug_objs.push((dbg_name, dbg_obj));
     }
 
-    // ── Player laser pool ────────────────────────────────────────────────
     let player_laser_img = Image {
         shape: prism::canvas::ShapeType::Rectangle(0.0, (LASER_W, LASER_H), 0.0),
         image: laser_img(80, 200, 255).into(),
@@ -176,7 +164,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         laser_objs.push((id, obj));
     }
 
-    // ── Enemy laser pool ─────────────────────────────────────────────────
     let enemy_laser_img = Image {
         shape: prism::canvas::ShapeType::Rectangle(0.0, (LASER_W, LASER_H), 0.0),
         image: laser_img(255, 60, 40).into(),
@@ -198,7 +185,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         elaser_objs.push((id, obj));
     }
 
-    // ── Enemies ──────────────────────────────────────────────────────────
     let enemy_img = Image {
         shape: prism::canvas::ShapeType::Rectangle(0.0, (ENEMY_W, ENEMY_H), 0.0),
         image: enemy_ship_img().into(),
@@ -229,7 +215,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         });
     }
 
-    // ── HUD elements ─────────────────────────────────────────────────────
     let hull_bar = GameObject::build("hull_bar")
         .image(Image {
             shape: prism::canvas::ShapeType::Rectangle(0.0, (HUD_BAR_W, HUD_BAR_H), 0.0),
@@ -272,7 +257,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         .ignore_zoom()
         .finish();
 
-    // ── Minimap ──────────────────────────────────────────────────────────
     let minimap = GameObject::build("minimap")
         .image(Image {
             shape: prism::canvas::ShapeType::Rectangle(0.0, (MINIMAP_W, MINIMAP_H), 0.0),
@@ -286,7 +270,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         .ignore_zoom()
         .finish();
 
-    // ── Pause overlay ────────────────────────────────────────────────────
     let mut pause_obj = GameObject::build("pause_overlay")
         .image(Image {
             shape: prism::canvas::ShapeType::Rectangle(0.0, (VW, VH), 0.0),
@@ -301,7 +284,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         .finish();
     pause_obj.visible = false;
 
-    // ── Controls help panel ──────────────────────────────────────────────
     let controls_w = 1200.0f32;
     let controls_h = 900.0f32;
     let mut controls_obj = GameObject::build("controls_panel")
@@ -318,7 +300,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         .finish();
     controls_obj.visible = false;
 
-    // ── Gravity debug text ───────────────────────────────────────────────
     let mut grav_debug_text = GameObject::build("grav_debug_text")
         .size(800.0, 50.0)
         .position(HUD_MARGIN, VH - 80.0)
@@ -328,14 +309,13 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         .finish();
     grav_debug_text.visible = false;
 
-    // ── Space debris ─────────────────────────────────────────────────────
     let mut debris_objs: Vec<(String, GameObject)> = Vec::new();
     let mut debris_seed: u64 = 0xDEBB_1E50;
     for i in 0..DEBRIS_COUNT {
         let id = format!("debris_{i}");
         let t = lcg(&mut debris_seed);
         let sz = DEBRIS_MIN_SIZE + t * (DEBRIS_MAX_SIZE - DEBRIS_MIN_SIZE);
-        let kind = (i % 3) as u8; // 0=rocky, 1=metallic, 2=icy
+        let kind = (i % 3) as u8;
         let dimg = Image {
             shape: prism::canvas::ShapeType::Rectangle(0.0, (sz, sz), 0.0),
             image: debris_img(sz as u32, debris_seed.wrapping_add(i as u64), kind).into(),
@@ -356,15 +336,14 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
             .collision_mask(collision_layers::PLAYER | collision_layers::PROJECTILE | collision_layers::TERRAIN | collision_layers::DEFAULT)
             .layer(3);
         builder = match kind {
-            1 => builder.heavy(),    // metallic — dense, low bounce
-            2 => builder.slippery(), // icy — low friction
-            _ => builder.bouncy(),   // rocky — bouncy
+            1 => builder.heavy(),
+            2 => builder.slippery(),
+            _ => builder.bouncy(),
         };
         let obj = builder.finish();
         debris_objs.push((id, obj));
     }
 
-    // ── Build scene ──────────────────────────────────────────────────────
     let mut scene = Scene::new("game")
         .with_object("bg", bg)
         .with_object("player", player)
@@ -377,26 +356,13 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         .with_object("controls_panel", controls_obj)
         .with_object("grav_debug_text", grav_debug_text);
 
-    for (name, obj) in planet_objs {
-        scene = scene.with_object(name, obj);
-    }
-    for (name, obj) in grav_debug_objs {
-        scene = scene.with_object(name, obj);
-    }
-    for (name, obj) in laser_objs {
-        scene = scene.with_object(name, obj);
-    }
-    for (name, obj) in elaser_objs {
-        scene = scene.with_object(name, obj);
-    }
-    for (name, obj) in enemy_objs {
-        scene = scene.with_object(name, obj);
-    }
-    for (name, obj) in debris_objs {
-        scene = scene.with_object(name, obj);
-    }
+    for (name, obj) in planet_objs        { scene = scene.with_object(name, obj); }
+    for (name, obj) in grav_debug_objs    { scene = scene.with_object(name, obj); }
+    for (name, obj) in laser_objs         { scene = scene.with_object(name, obj); }
+    for (name, obj) in elaser_objs        { scene = scene.with_object(name, obj); }
+    for (name, obj) in enemy_objs         { scene = scene.with_object(name, obj); }
+    for (name, obj) in debris_objs        { scene = scene.with_object(name, obj); }
 
-    // ── Initial game state ───────────────────────────────────────────────
     let init_player_lasers: Vec<LaserState> = (0..LASER_POOL_SIZE)
         .map(|_| LaserState { alive: false, age: 0, angle: 0.0 })
         .collect();
@@ -429,44 +395,36 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
     let scene = scene.on_enter({
         let state = state.clone();
         move |canvas| {
-            // Camera setup — center_on snaps immediately so there is no
-            // lerp-from-origin artifact on the first frame.
             let mut cam = Camera::new((WORLD_W, WORLD_H), (VW, VH));
             cam.follow(Some(Target::name("player")));
             cam.lerp_speed = CAMERA_LERP;
             cam.center_on(SPAWN_X, SPAWN_Y);
             canvas.set_camera(cam);
 
-            // Pin background to viewport top-left (ignore_zoom keeps it in screen space).
             const BG_PAD: f32 = 60.0;
             if let Some(obj) = canvas.get_game_object_mut("bg") {
                 obj.position = (-BG_PAD, -BG_PAD);
             }
 
-            // Enable crystalline physics
             canvas.run(Action::enable_crystalline());
 
-            // Spawn engine exhaust emitter attached to player bottom (thruster nozzle)
             let mut exhaust = Emitter::thruster_exhaust((0.0, 0.0));
             exhaust.name = "player_exhaust".into();
             exhaust.size = 6.0;
             exhaust.rate = 120.0;
             exhaust.lifetime = 0.6;
-            exhaust.render_layer = 4; // behind player (layer 5)
+            exhaust.render_layer = 4;
             canvas.run(Action::spawn_emitter(exhaust));
             canvas.run(Action::attach_emitter_at(
                 "player_exhaust",
                 Target::name("player"),
                 Location::on_target(
                     Target::name("player"),
-                    Anchor { x: 0.5, y: 0.85 },  // slightly inside the engine
+                    Anchor { x: 0.5, y: 0.85 },
                     (0.0, 0.0),
                 ),
             ));
 
-            // ── Planet surface radial particle emitters ──────────────────
-            // Slow, subtle particles rising from the planet surface.
-            // render_layer 1 draws behind planets (which are at layer 2).
             for p in PLANETS {
                 let emitter_name = format!("{}_aura", p.name);
                 let mut aura = EmitterBuilder::new(&emitter_name)
@@ -484,29 +442,20 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 canvas.run(Action::spawn_emitter(aura));
             }
 
-            // ── Pause toggle (Escape / P) ────────────────────────────────
+            // ── Pause toggle (P) ─────────────────────────────────────────
             let st_pause = state.clone();
             canvas.on_key_press(move |c, key| {
-                let is_pause = matches!(key,
-                    Key::Character(ch) if ch.as_str() == "p"
-                );
+                let is_pause = matches!(key, Key::Character(ch) if ch.as_str() == "p");
                 if !is_pause { return; }
-
                 let mut s = st_pause.lock().unwrap();
                 if s.game_over { return; }
-
                 if s.paused {
                     s.paused = false;
                     s.show_controls = false;
                     drop(s);
                     c.resume();
-                    let _cam_pos = c.camera().map(|cam| cam.position).unwrap_or((0.0, 0.0));
-                    if let Some(obj) = c.get_game_object_mut("pause_overlay") {
-                        obj.visible = false;
-                    }
-                    if let Some(obj) = c.get_game_object_mut("controls_panel") {
-                        obj.visible = false;
-                    }
+                    if let Some(obj) = c.get_game_object_mut("pause_overlay") { obj.visible = false; }
+                    if let Some(obj) = c.get_game_object_mut("controls_panel") { obj.visible = false; }
                 } else {
                     s.paused = true;
                     drop(s);
@@ -518,7 +467,7 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 }
             });
 
-            // ── Controls panel toggle (C while paused) ──────────────────
+            // ── Controls panel toggle (C while paused) ───────────────────
             let st_ctrl = state.clone();
             canvas.on_key_press(move |c, key| {
                 let is_c = matches!(key, Key::Character(ch) if ch.as_str() == "c");
@@ -545,31 +494,23 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 drop(s);
                 for p in PLANETS {
                     let ring_name = format!("{}_grav_ring", p.name);
-                    if let Some(obj) = c.get_game_object_mut(&ring_name) {
-                        obj.visible = show;
-                    }
+                    if let Some(obj) = c.get_game_object_mut(&ring_name) { obj.visible = show; }
                 }
-                if let Some(obj) = c.get_game_object_mut("grav_debug_text") {
-                    obj.visible = show;
-                }
+                if let Some(obj) = c.get_game_object_mut("grav_debug_text") { obj.visible = show; }
             });
 
-            // ── Fire (space / left mouse) ────────────────────────────────
+            // ── Fire (space) ─────────────────────────────────────────────
             let st_fire = state.clone();
             canvas.on_key_press(move |c, key| {
-                let is_space = matches!(key, Key::Named(NamedKey::Space));
-                if !is_space { return; }
+                if !matches!(key, Key::Named(NamedKey::Space)) { return; }
                 fire_player_laser(&st_fire, c);
             });
 
-            // ── Zoom (Z = in, X = out) ───────────────────────────────────
+            // ── Zoom (Z / X) ─────────────────────────────────────────────
             canvas.on_key_press(|c, key| {
                 match key {
-                    Key::Character(ch) if ch.as_str() == "z" => {
-                        c.run(Action::add_zoom(0.1));
-                    }
+                    Key::Character(ch) if ch.as_str() == "z" => { c.run(Action::add_zoom(0.1)); }
                     Key::Character(ch) if ch.as_str() == "x" => {
-                        // Floor at 0.3 to prevent extreme zoom-out
                         if c.camera().map_or(true, |cam| cam.zoom > 0.3) {
                             c.run(Action::add_zoom(-0.1));
                         }
@@ -591,7 +532,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 if s.game_over || s.paused { return; }
                 s.ticks += 1;
 
-                // ── Sync state from engine (respects planet landings, auto-align, crystalline) ──
                 if let Some(obj) = c.get_game_object("player") {
                     s.px = obj.position.0 + PLAYER_W / 2.0;
                     s.py = obj.position.1 + PLAYER_H / 2.0;
@@ -600,39 +540,18 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     s.rotation = obj.rotation;
                 }
 
-                // ── Player input ─────────────────────────────────────────
-                // Rotation
-                if c.key("q") {
-                    s.rotation -= PLAYER_ROTATE_SPEED;
-                }
-                if c.key("e") || c.key("r") {
-                    s.rotation += PLAYER_ROTATE_SPEED;
-                }               
-                // Normalize to 0..360
+                if c.key("q") { s.rotation -= PLAYER_ROTATE_SPEED; }
+                if c.key("e") || c.key("r") { s.rotation += PLAYER_ROTATE_SPEED; }
                 s.rotation = ((s.rotation % 360.0) + 360.0) % 360.0;
 
-                // Thrust-relative movement
                 let (fwd_x, fwd_y) = dir_from_angle(s.rotation);
-                let (right_x, right_y) = (-fwd_y, fwd_x); // perpendicular CW (screen Y-down)
+                let (right_x, right_y) = (-fwd_y, fwd_x);
 
-                if c.key("w") || c.key("up") {
-                    s.vx += fwd_x * PLAYER_THRUST;
-                    s.vy += fwd_y * PLAYER_THRUST;
-                }
-                if c.key("s") || c.key("down") {
-                    s.vx -= fwd_x * PLAYER_REVERSE;
-                    s.vy -= fwd_y * PLAYER_REVERSE;
-                }
-                if c.key("d") || c.key("right") {
-                    s.vx += right_x * PLAYER_STRAFE;
-                    s.vy += right_y * PLAYER_STRAFE;
-                }
-                if c.key("a") || c.key("left") {
-                    s.vx -= right_x * PLAYER_STRAFE;
-                    s.vy -= right_y * PLAYER_STRAFE;
-                }
+                if c.key("w") || c.key("up")    { s.vx += fwd_x * PLAYER_THRUST;   s.vy += fwd_y * PLAYER_THRUST; }
+                if c.key("s") || c.key("down")  { s.vx -= fwd_x * PLAYER_REVERSE;  s.vy -= fwd_y * PLAYER_REVERSE; }
+                if c.key("d") || c.key("right") { s.vx += right_x * PLAYER_STRAFE; s.vy += right_y * PLAYER_STRAFE; }
+                if c.key("a") || c.key("left")  { s.vx -= right_x * PLAYER_STRAFE; s.vy -= right_y * PLAYER_STRAFE; }
 
-                // Speed cap
                 let spd = (s.vx * s.vx + s.vy * s.vy).sqrt();
                 if spd > PLAYER_MAX_SPEED {
                     let scale = PLAYER_MAX_SPEED / spd;
@@ -640,25 +559,19 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     s.vy *= scale;
                 }
 
-                // World bounds wrap
-                if s.px < 0.0 { s.px += WORLD_W; }
+                if s.px < 0.0    { s.px += WORLD_W; }
                 if s.px > WORLD_W { s.px -= WORLD_W; }
-                if s.py < 0.0 { s.py += WORLD_H; }
+                if s.py < 0.0    { s.py += WORLD_H; }
                 if s.py > WORLD_H { s.py -= WORLD_H; }
 
-                // Update player object — let crystalline integrate position from momentum
                 if let Some(obj) = c.get_game_object_mut("player") {
                     obj.position = (s.px - PLAYER_W / 2.0, s.py - PLAYER_H / 2.0);
                     obj.rotation = s.rotation;
                     obj.momentum = (s.vx, s.vy);
                 }
 
-                // ── Fire cooldown ────────────────────────────────────────
-                if s.fire_cooldown > 0 {
-                    s.fire_cooldown -= 1;
-                }
+                if s.fire_cooldown > 0 { s.fire_cooldown -= 1; }
 
-                // ── Shield regen ─────────────────────────────────────────
                 if s.shield < SHIELD_MAX {
                     s.shield_regen_timer += 1;
                     if s.shield_regen_timer >= SHIELD_REGEN_DELAY {
@@ -666,7 +579,7 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // ── Update player lasers ─────────────────────────────────
+                // ── Player lasers ────────────────────────────────────────
                 for i in 0..LASER_POOL_SIZE {
                     let ls = &mut s.player_lasers[i];
                     if !ls.alive { continue; }
@@ -688,7 +601,7 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // ── Update enemy lasers ──────────────────────────────────
+                // ── Enemy lasers ─────────────────────────────────────────
                 for i in 0..ENEMY_LASER_POOL_SIZE {
                     let ls = &mut s.enemy_lasers[i];
                     if !ls.alive { continue; }
@@ -716,30 +629,24 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
 
                 for i in 0..ENEMY_COUNT {
                     if !s.enemies[i].alive { continue; }
-
                     let eid = format!("enemy_{i}");
                     let (ex, ey) = if let Some(obj) = c.get_game_object(&eid) {
                         (obj.position.0 + ENEMY_W / 2.0, obj.position.1 + ENEMY_H / 2.0)
-                    } else {
-                        continue;
-                    };
+                    } else { continue; };
 
                     let dx = player_pos.0 - ex;
                     let dy = player_pos.1 - ey;
                     let dist = (dx * dx + dy * dy).sqrt();
 
                     if dist < ENEMY_DETECT_RANGE {
-                        // Turn toward player
                         let target_angle = dy.atan2(dx).to_degrees() + 90.0;
                         let target_angle = ((target_angle % 360.0) + 360.0) % 360.0;
                         let mut diff = target_angle - s.enemies[i].rotation;
-                        if diff > 180.0 { diff -= 360.0; }
+                        if diff > 180.0  { diff -= 360.0; }
                         if diff < -180.0 { diff += 360.0; }
-                        let turn = diff.clamp(-2.5, 2.5);
-                        s.enemies[i].rotation += turn;
+                        s.enemies[i].rotation += diff.clamp(-2.5, 2.5);
                         s.enemies[i].rotation = ((s.enemies[i].rotation % 360.0) + 360.0) % 360.0;
 
-                        // Move toward player
                         let (mx, my) = dir_from_angle(s.enemies[i].rotation);
                         if let Some(obj) = c.get_game_object_mut(&eid) {
                             obj.position.0 += mx * ENEMY_SPEED;
@@ -747,25 +654,21 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                             obj.rotation = s.enemies[i].rotation;
                         }
 
-                        // Fire at player
                         s.enemies[i].fire_cooldown = s.enemies[i].fire_cooldown.saturating_sub(1);
                         if s.enemies[i].fire_cooldown == 0 && dist < ENEMY_DETECT_RANGE * 0.7 {
                             enemy_fire_requests.push((i, ex, ey, s.enemies[i].rotation));
                             s.enemies[i].fire_cooldown = ENEMY_FIRE_COOLDOWN;
                         }
                     } else {
-                        // Patrol: drift slowly
                         let (mx, my) = dir_from_angle(s.enemies[i].rotation);
                         if let Some(obj) = c.get_game_object_mut(&eid) {
                             obj.position.0 += mx * ENEMY_SPEED * 0.3;
                             obj.position.1 += my * ENEMY_SPEED * 0.3;
                         }
-                        // Slowly rotate
                         s.enemies[i].rotation += 0.3;
                     }
                 }
 
-                // Process enemy fire requests
                 for (_, ex, ey, angle) in enemy_fire_requests {
                     fire_enemy_laser(&mut s, c, ex, ey, angle);
                 }
@@ -776,22 +679,16 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     let lid = format!("plaser_{li}");
                     let (lx, ly) = if let Some(obj) = c.get_game_object(&lid) {
                         (obj.position.0, obj.position.1)
-                    } else {
-                        continue;
-                    };
+                    } else { continue; };
 
                     for ei in 0..ENEMY_COUNT {
                         if !s.enemies[ei].alive { continue; }
                         let eid = format!("enemy_{ei}");
                         let (ex, ey) = if let Some(obj) = c.get_game_object(&eid) {
                             (obj.position.0, obj.position.1)
-                        } else {
-                            continue;
-                        };
+                        } else { continue; };
 
-                        // Simple AABB check
                         if lx > ex && lx < ex + ENEMY_W && ly > ey && ly < ey + ENEMY_H {
-                            // Hit!
                             s.player_lasers[li].alive = false;
                             if let Some(obj) = c.get_game_object_mut(&lid) {
                                 obj.visible = false;
@@ -801,7 +698,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                             if s.enemies[ei].hull <= 0.0 {
                                 s.enemies[ei].alive = false;
                                 s.score += 100;
-                                // Spawn explosion burst
                                 let mut expl = Emitter::explosion((ex + ENEMY_W / 2.0, ey + ENEMY_H / 2.0));
                                 expl.render_layer = 6;
                                 c.spawn_particle_burst(&expl, 40);
@@ -810,7 +706,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                                     obj.position = (-500.0, -500.0);
                                 }
                             } else {
-                                // Damage burst + sparks on hit
                                 let mut dmg = Emitter::damage_burst((lx, ly));
                                 dmg.render_layer = 6;
                                 c.spawn_particle_burst(&dmg, 15);
@@ -829,36 +724,29 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     let lid = format!("elaser_{li}");
                     let (lx, ly) = if let Some(obj) = c.get_game_object(&lid) {
                         (obj.position.0, obj.position.1)
-                    } else {
-                        continue;
-                    };
+                    } else { continue; };
 
                     let half_w = PLAYER_W / 2.0;
                     let half_h = PLAYER_H / 2.0;
                     if lx > s.px - half_w && lx < s.px + half_w
                         && ly > s.py - half_h && ly < s.py + half_h
                     {
-                        // Hit player
                         s.enemy_lasers[li].alive = false;
                         if let Some(obj) = c.get_game_object_mut(&lid) {
                             obj.visible = false;
                             obj.position = (-200.0, -200.0);
                         }
 
-                        // Shield absorbs first
                         if s.shield > 0.0 {
                             let absorbed = ENEMY_LASER_DAMAGE.min(s.shield);
                             s.shield -= absorbed;
                             let remaining = ENEMY_LASER_DAMAGE - absorbed;
-                            if remaining > 0.0 {
-                                s.hull -= remaining;
-                            }
+                            if remaining > 0.0 { s.hull -= remaining; }
                         } else {
                             s.hull -= ENEMY_LASER_DAMAGE;
                         }
-                        s.shield_regen_timer = 0; // reset regen delay
+                        s.shield_regen_timer = 0;
 
-                        // Hit damage burst + sparks on player
                         let mut dmg = Emitter::damage_burst((s.px, s.py));
                         dmg.render_layer = 6;
                         c.spawn_particle_burst(&dmg, 15);
@@ -866,47 +754,38 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                         spark.render_layer = 6;
                         c.spawn_particle_burst(&spark, 8);
 
-                        // Check death
                         if s.hull <= 0.0 {
                             s.hull = 0.0;
                             s.game_over = true;
                             let mut expl = Emitter::explosion((s.px, s.py));
                             expl.render_layer = 6;
                             c.spawn_particle_burst(&expl, 40);
-                            if let Some(obj) = c.get_game_object_mut("player") {
-                                obj.visible = false;
-                            }
+                            if let Some(obj) = c.get_game_object_mut("player") { obj.visible = false; }
                         }
                     }
                 }
 
-                // ── Collision: player lasers → debris ─────────────────
+                // ── Collision: player lasers → debris ────────────────────
                 for di in 0..DEBRIS_COUNT {
                     let did = format!("debris_{di}");
                     let (dpos, dsz) = if let Some(obj) = c.get_game_object(&did) {
                         if !obj.visible { continue; }
                         (obj.position, obj.size)
-                    } else {
-                        continue;
-                    };
-                    // Check player laser hits on debris
+                    } else { continue; };
+
                     for li in 0..LASER_POOL_SIZE {
                         if !s.player_lasers[li].alive { continue; }
                         let lid = format!("plaser_{li}");
                         let (lx, ly) = if let Some(obj) = c.get_game_object(&lid) {
                             (obj.position.0, obj.position.1)
-                        } else {
-                            continue;
-                        };
-                        if lx > dpos.0 && lx < dpos.0 + dsz.0
-                            && ly > dpos.1 && ly < dpos.1 + dsz.1
-                        {
+                        } else { continue; };
+
+                        if lx > dpos.0 && lx < dpos.0 + dsz.0 && ly > dpos.1 && ly < dpos.1 + dsz.1 {
                             s.player_lasers[li].alive = false;
                             if let Some(obj) = c.get_game_object_mut(&lid) {
                                 obj.visible = false;
                                 obj.position = (-200.0, -200.0);
                             }
-                            // Debris destroyed — spawn debris particles
                             let cx = dpos.0 + dsz.0 / 2.0;
                             let cy = dpos.1 + dsz.1 / 2.0;
                             let mut expl = Emitter::asteroid_debris((cx, cy));
@@ -925,24 +804,20 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // ── Collision: player ↔ debris (contact damage) ──────────
+                // ── Collision: player ↔ debris ───────────────────────────
                 if !s.game_over {
                     for di in 0..DEBRIS_COUNT {
                         let did = format!("debris_{di}");
                         let (dpos, dsz) = if let Some(obj) = c.get_game_object(&did) {
                             if !obj.visible { continue; }
                             (obj.position, obj.size)
-                        } else {
-                            continue;
-                        };
-                        let half_pw = PLAYER_W / 2.0;
-                        let half_ph = PLAYER_H / 2.0;
+                        } else { continue; };
+
                         let dcx = dpos.0 + dsz.0 / 2.0;
                         let dcy = dpos.1 + dsz.1 / 2.0;
-                        if (s.px - dcx).abs() < half_pw + dsz.0 / 2.0
-                            && (s.py - dcy).abs() < half_ph + dsz.1 / 2.0
+                        if (s.px - dcx).abs() < PLAYER_W / 2.0 + dsz.0 / 2.0
+                            && (s.py - dcy).abs() < PLAYER_H / 2.0 + dsz.1 / 2.0
                         {
-                            // Contact damage proportional to debris size
                             let dmg_amt = DEBRIS_DAMAGE * (dsz.0 / DEBRIS_MAX_SIZE);
                             if s.shield > 0.0 {
                                 let absorbed = dmg_amt.min(s.shield);
@@ -956,7 +831,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                             let mut spark = Emitter::sparks((s.px, s.py));
                             spark.render_layer = 6;
                             c.spawn_particle_burst(&spark, 6);
-                            // Push debris away (hide it temporarily after hit)
                             if let Some(obj) = c.get_game_object_mut(&did) {
                                 obj.visible = false;
                                 obj.position = (-9999.0, -9999.0);
@@ -967,25 +841,20 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                                 let mut expl = Emitter::explosion((s.px, s.py));
                                 expl.render_layer = 6;
                                 c.spawn_particle_burst(&expl, 40);
-                                if let Some(obj) = c.get_game_object_mut("player") {
-                                    obj.visible = false;
-                                }
+                                if let Some(obj) = c.get_game_object_mut("player") { obj.visible = false; }
                                 break;
                             }
                         }
                     }
                 }
 
-                // ── Pin background to viewport ──────────────────────────
-                // bg has ignore_zoom — lives in virtual-screen space.
+                // ── Pin background ───────────────────────────────────────
                 const BG_PAD: f32 = 60.0;
                 if let Some(obj) = c.get_game_object_mut("bg") {
                     obj.position = (-BG_PAD, -BG_PAD);
                 }
 
-                // ── Update HUD ───────────────────────────────────────────
-
-                // Hull bar
+                // ── HUD ──────────────────────────────────────────────────
                 if let Some(obj) = c.get_game_object_mut("hull_bar") {
                     obj.position = (HUD_MARGIN, HUD_MARGIN);
                     let fill = s.hull / HULL_MAX;
@@ -998,7 +867,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     });
                 }
 
-                // Shield bar
                 if let Some(obj) = c.get_game_object_mut("shield_bar") {
                     obj.position = (HUD_MARGIN, HUD_MARGIN + HUD_BAR_H + 10.0);
                     let fill = s.shield / SHIELD_MAX;
@@ -1009,37 +877,27 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     });
                 }
 
-                // Score display
                 if let Some(obj) = c.get_game_object_mut("score_display") {
                     obj.position = (VW - 350.0, HUD_MARGIN);
-                    if let Ok(font) = Font::from_bytes(include_bytes!("../assets/font.ttf")) {
-                        obj.set_text(TextSpec::new(vec![SpanSpec {
-                            text: format!("SCORE: {}", s.score),
-                            font_size: 42.0,
-                            line_height: None,
-                            font,
-                            color: Color(255, 255, 255, 255),
-                            letter_spacing: 0.0,
-                        }], Align::Right));
-                    }
+                    obj.set_drawable(Box::new(make_text(
+                        format!("SCORE: {}", s.score),
+                        42.0,
+                        Color(255, 255, 255, 255),
+                        Align::Right,
+                    )));
                 }
 
-                // Hull label
                 if let Some(obj) = c.get_game_object_mut("hull_label") {
                     obj.position = (HUD_MARGIN, HUD_MARGIN - 36.0);
-                    if let Ok(font) = Font::from_bytes(include_bytes!("../assets/font.ttf")) {
-                        obj.set_text(TextSpec::new(vec![SpanSpec {
-                            text: format!("HULL: {:.0}  |  SHIELD: {:.0}", s.hull, s.shield),
-                            font_size: 30.0,
-                            line_height: None,
-                            font,
-                            color: Color(200, 220, 240, 255),
-                            letter_spacing: 0.0,
-                        }], Align::Left));
-                    }
+                    obj.set_drawable(Box::new(make_text(
+                        format!("HULL: {:.0}  |  SHIELD: {:.0}", s.hull, s.shield),
+                        30.0,
+                        Color(200, 220, 240, 255),
+                        Align::Left,
+                    )));
                 }
 
-                // ── Gravity debug HUD ─────────────────────────────────
+                // ── Gravity debug HUD ────────────────────────────────────
                 if s.show_gravity_debug {
                     let mut grav_lines: Vec<String> = Vec::new();
                     for p in PLANETS {
@@ -1064,25 +922,20 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     };
                     if let Some(obj) = c.get_game_object_mut("grav_debug_text") {
                         obj.position = (HUD_MARGIN, VH - 80.0);
-                        if let Ok(font) = Font::from_bytes(include_bytes!("../assets/font.ttf")) {
-                            obj.set_text(TextSpec::new(vec![SpanSpec {
-                                text: grav_msg.into(),
-                                font_size: 22.0,
-                                line_height: None,
-                                font,
-                                color: Color(180, 255, 180, 200),
-                                letter_spacing: 0.0,
-                            }], Align::Left));
-                        }
+                        obj.set_drawable(Box::new(make_text(
+                            grav_msg,
+                            22.0,
+                            Color(180, 255, 180, 200),
+                            Align::Left,
+                        )));
                     }
                 }
 
-                // ── Update minimap ───────────────────────────────────────
+                // ── Minimap ──────────────────────────────────────────────
                 let mw = MINIMAP_W as u32;
                 let mh = MINIMAP_H as u32;
                 let mut mimg = minimap_bg();
 
-                // Draw planets on minimap
                 for p in PLANETS {
                     let mx = ((p.x / WORLD_W) * mw as f32) as i32;
                     let my = ((p.y / WORLD_H) * mh as f32) as i32;
@@ -1100,7 +953,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // Draw player dot
                 let pmx = ((s.px / WORLD_W) * mw as f32) as i32;
                 let pmy = ((s.py / WORLD_H) * mh as f32) as i32;
                 for dy in -2i32..=2 {
@@ -1113,7 +965,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // Draw enemy dots
                 for i in 0..ENEMY_COUNT {
                     if !s.enemies[i].alive { continue; }
                     let eid = format!("enemy_{i}");
@@ -1132,7 +983,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // Draw debris dots (grey)
                 for di in 0..DEBRIS_COUNT {
                     let did = format!("debris_{di}");
                     if let Some(dobj) = c.get_game_object(&did) {
@@ -1145,12 +995,8 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // Set minimap image and position
                 if let Some(obj) = c.get_game_object_mut("minimap") {
-                    obj.position = (
-                        VW - MINIMAP_W - MINIMAP_MARGIN,
-                        VH - MINIMAP_H - MINIMAP_MARGIN,
-                    );
+                    obj.position = (VW - MINIMAP_W - MINIMAP_MARGIN, VH - MINIMAP_H - MINIMAP_MARGIN);
                     obj.set_image(Image {
                         shape: prism::canvas::ShapeType::Rectangle(0.0, (MINIMAP_W, MINIMAP_H), 0.0),
                         image: mimg.into(),
@@ -1158,20 +1004,15 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     });
                 }
 
-                // ── Game over check ──────────────────────────────────────
+                // ── Game over ────────────────────────────────────────────
                 if s.game_over {
-                    // Show game over text
                     if let Some(obj) = c.get_game_object_mut("hull_label") {
-                        if let Ok(font) = Font::from_bytes(include_bytes!("../assets/font.ttf")) {
-                            obj.set_text(TextSpec::new(vec![SpanSpec {
-                                text: "GAME OVER - Press R to restart".into(),
-                                font_size: 52.0,
-                                line_height: None,
-                                font,
-                                color: Color(255, 80, 80, 255),
-                                letter_spacing: 0.0,
-                            }], Align::Left));
-                        }
+                        obj.set_drawable(Box::new(make_text(
+                            "GAME OVER - Press R to restart".to_string(),
+                            52.0,
+                            Color(255, 80, 80, 255),
+                            Align::Left,
+                        )));
                     }
                 }
             });
@@ -1200,9 +1041,7 @@ fn fire_player_laser(state: &Arc<Mutex<State>>, c: &mut Canvas) {
     if s.fire_cooldown > 0 || s.game_over || s.paused { return; }
     s.fire_cooldown = FIRE_COOLDOWN;
 
-    // Find a free laser slot
-    let slot = s.player_lasers.iter().position(|l| !l.alive);
-    let slot = match slot {
+    let slot = match s.player_lasers.iter().position(|l| !l.alive) {
         Some(i) => i,
         None => return,
     };
@@ -1210,7 +1049,6 @@ fn fire_player_laser(state: &Arc<Mutex<State>>, c: &mut Canvas) {
     let (fwd_x, fwd_y) = dir_from_angle(s.rotation);
     let nose_x = s.px + fwd_x * (PLAYER_H / 2.0 + LASER_H / 2.0);
     let nose_y = s.py + fwd_y * (PLAYER_H / 2.0 + LASER_H / 2.0);
-
     s.player_lasers[slot] = LaserState { alive: true, age: 0, angle: s.rotation };
 
     let id = format!("plaser_{slot}");
@@ -1222,8 +1060,7 @@ fn fire_player_laser(state: &Arc<Mutex<State>>, c: &mut Canvas) {
 }
 
 fn fire_enemy_laser(s: &mut State, c: &mut Canvas, ex: f32, ey: f32, angle: f32) {
-    let slot = s.enemy_lasers.iter().position(|l| !l.alive);
-    let slot = match slot {
+    let slot = match s.enemy_lasers.iter().position(|l| !l.alive) {
         Some(i) => i,
         None => return,
     };
@@ -1231,7 +1068,6 @@ fn fire_enemy_laser(s: &mut State, c: &mut Canvas, ex: f32, ey: f32, angle: f32)
     let (fwd_x, fwd_y) = dir_from_angle(angle);
     let nose_x = ex + fwd_x * (ENEMY_H / 2.0 + LASER_H / 2.0);
     let nose_y = ey + fwd_y * (ENEMY_H / 2.0 + LASER_H / 2.0);
-
     s.enemy_lasers[slot] = LaserState { alive: true, age: 0, angle };
 
     let id = format!("elaser_{slot}");
