@@ -503,9 +503,12 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 if btn != MouseButton::Left { return; }
                 fire_player_laser(&st_fire2, c);
             });
-
-            // Load font once — captured by the on_update closure
-            let hud_font = font("assets/font.ttf");
+            
+            let hud_font = Arc::new(
+                Font::from_bytes(
+                    &std::fs::read("assets/font.ttf").expect("font not found")
+                ).expect("invalid font")
+            );
 
             let st_tick = state.clone();
             canvas.on_update(move |c| {
