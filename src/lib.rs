@@ -9,9 +9,6 @@ use images::*;
 
 use std::sync::{Arc, Mutex};
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Game state (shared across closures)
-// ─────────────────────────────────────────────────────────────────────────────
 #[derive(Clone)]
 struct LaserState {
     alive: bool,
@@ -65,19 +62,6 @@ fn dir_from_angle(deg: f32) -> (f32, f32) {
     (rad.cos(), rad.sin())
 }
 
-fn make_text(text: String, font_size: f32, color: Color, align: Align) -> Text {
-    let font = Arc::new(Font::from_bytes(include_bytes!("../assets/font.ttf")).expect("font"));
-    Text::new(
-        vec![Span::new(text, font_size, Some(font_size * 1.35), font, color, 0.0)],
-        None,
-        align,
-        None,
-    )
-}
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Build the main game scene
-// ─────────────────────────────────────────────────────────────────────────────
 fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
     const BG_PAD: f32 = 60.0;
     let bg_w = VW + BG_PAD * 2.0;
@@ -442,7 +426,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 canvas.run(Action::spawn_emitter(aura));
             }
 
-            // ── Pause toggle (P) ─────────────────────────────────────────
             let st_pause = state.clone();
             canvas.on_key_press(move |c, key| {
                 let is_pause = matches!(key, Key::Character(ch) if ch.as_str() == "p");
@@ -467,7 +450,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 }
             });
 
-            // ── Controls panel toggle (C while paused) ───────────────────
             let st_ctrl = state.clone();
             canvas.on_key_press(move |c, key| {
                 let is_c = matches!(key, Key::Character(ch) if ch.as_str() == "c");
@@ -483,7 +465,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 }
             });
 
-            // ── Gravity debug toggle (G) ─────────────────────────────────
             let st_grav = state.clone();
             canvas.on_key_press(move |c, key| {
                 let is_g = matches!(key, Key::Character(ch) if ch.as_str() == "g");
@@ -499,14 +480,12 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 if let Some(obj) = c.get_game_object_mut("grav_debug_text") { obj.visible = show; }
             });
 
-            // ── Fire (space) ─────────────────────────────────────────────
             let st_fire = state.clone();
             canvas.on_key_press(move |c, key| {
                 if !matches!(key, Key::Named(NamedKey::Space)) { return; }
                 fire_player_laser(&st_fire, c);
             });
 
-            // ── Zoom (Z / X) ─────────────────────────────────────────────
             canvas.on_key_press(|c, key| {
                 match key {
                     Key::Character(ch) if ch.as_str() == "z" => { c.run(Action::add_zoom(0.1)); }
@@ -525,7 +504,9 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 fire_player_laser(&st_fire2, c);
             });
 
-            // ── Main tick loop ───────────────────────────────────────────
+            // Load font once — captured by the on_update closure
+            let hud_font = font("assets/font.ttf");
+
             let st_tick = state.clone();
             canvas.on_update(move |c| {
                 let mut s = st_tick.lock().unwrap();
@@ -559,9 +540,9 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     s.vy *= scale;
                 }
 
-                if s.px < 0.0    { s.px += WORLD_W; }
+                if s.px < 0.0     { s.px += WORLD_W; }
                 if s.px > WORLD_W { s.px -= WORLD_W; }
-                if s.py < 0.0    { s.py += WORLD_H; }
+                if s.py < 0.0     { s.py += WORLD_H; }
                 if s.py > WORLD_H { s.py -= WORLD_H; }
 
                 if let Some(obj) = c.get_game_object_mut("player") {
@@ -579,7 +560,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // ── Player lasers ────────────────────────────────────────
                 for i in 0..LASER_POOL_SIZE {
                     let ls = &mut s.player_lasers[i];
                     if !ls.alive { continue; }
@@ -601,7 +581,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // ── Enemy lasers ─────────────────────────────────────────
                 for i in 0..ENEMY_LASER_POOL_SIZE {
                     let ls = &mut s.enemy_lasers[i];
                     if !ls.alive { continue; }
@@ -623,7 +602,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // ── Enemy AI ─────────────────────────────────────────────
                 let player_pos = (s.px, s.py);
                 let mut enemy_fire_requests: Vec<(usize, f32, f32, f32)> = Vec::new();
 
@@ -673,7 +651,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     fire_enemy_laser(&mut s, c, ex, ey, angle);
                 }
 
-                // ── Collision: player lasers → enemies ───────────────────
                 for li in 0..LASER_POOL_SIZE {
                     if !s.player_lasers[li].alive { continue; }
                     let lid = format!("plaser_{li}");
@@ -718,7 +695,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // ── Collision: enemy lasers → player ─────────────────────
                 for li in 0..ENEMY_LASER_POOL_SIZE {
                     if !s.enemy_lasers[li].alive { continue; }
                     let lid = format!("elaser_{li}");
@@ -765,7 +741,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // ── Collision: player lasers → debris ────────────────────
                 for di in 0..DEBRIS_COUNT {
                     let did = format!("debris_{di}");
                     let (dpos, dsz) = if let Some(obj) = c.get_game_object(&did) {
@@ -804,7 +779,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // ── Collision: player ↔ debris ───────────────────────────
                 if !s.game_over {
                     for di in 0..DEBRIS_COUNT {
                         let did = format!("debris_{di}");
@@ -848,7 +822,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     }
                 }
 
-                // ── Pin background ───────────────────────────────────────
                 const BG_PAD: f32 = 60.0;
                 if let Some(obj) = c.get_game_object_mut("bg") {
                     obj.position = (-BG_PAD, -BG_PAD);
@@ -877,27 +850,25 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     });
                 }
 
+                // Build text before mutable borrows
+                let score_text = c.make_text(
+                    format!("SCORE: {}", s.score),
+                    42.0, Color(255, 255, 255, 255), Align::Right, hud_font.clone(),
+                );
                 if let Some(obj) = c.get_game_object_mut("score_display") {
                     obj.position = (VW - 350.0, HUD_MARGIN);
-                    obj.set_drawable(Box::new(make_text(
-                        format!("SCORE: {}", s.score),
-                        42.0,
-                        Color(255, 255, 255, 255),
-                        Align::Right,
-                    )));
+                    obj.set_drawable(Box::new(score_text));
                 }
 
+                let hull_text = c.make_text(
+                    format!("HULL: {:.0}  |  SHIELD: {:.0}", s.hull, s.shield),
+                    30.0, Color(200, 220, 240, 255), Align::Left, hud_font.clone(),
+                );
                 if let Some(obj) = c.get_game_object_mut("hull_label") {
                     obj.position = (HUD_MARGIN, HUD_MARGIN - 36.0);
-                    obj.set_drawable(Box::new(make_text(
-                        format!("HULL: {:.0}  |  SHIELD: {:.0}", s.hull, s.shield),
-                        30.0,
-                        Color(200, 220, 240, 255),
-                        Align::Left,
-                    )));
+                    obj.set_drawable(Box::new(hull_text));
                 }
 
-                // ── Gravity debug HUD ────────────────────────────────────
                 if s.show_gravity_debug {
                     let mut grav_lines: Vec<String> = Vec::new();
                     for p in PLANETS {
@@ -920,14 +891,12 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     } else {
                         grav_lines.join(" | ")
                     };
+                    let grav_text = c.make_text(
+                        grav_msg, 22.0, Color(180, 255, 180, 200), Align::Left, hud_font.clone(),
+                    );
                     if let Some(obj) = c.get_game_object_mut("grav_debug_text") {
                         obj.position = (HUD_MARGIN, VH - 80.0);
-                        obj.set_drawable(Box::new(make_text(
-                            grav_msg,
-                            22.0,
-                            Color(180, 255, 180, 200),
-                            Align::Left,
-                        )));
+                        obj.set_drawable(Box::new(grav_text));
                     }
                 }
 
@@ -1004,20 +973,17 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                     });
                 }
 
-                // ── Game over ────────────────────────────────────────────
                 if s.game_over {
+                    let over_text = c.make_text(
+                        "GAME OVER - Press R to restart".to_string(),
+                        52.0, Color(255, 80, 80, 255), Align::Left, hud_font.clone(),
+                    );
                     if let Some(obj) = c.get_game_object_mut("hull_label") {
-                        obj.set_drawable(Box::new(make_text(
-                            "GAME OVER - Press R to restart".to_string(),
-                            52.0,
-                            Color(255, 80, 80, 255),
-                            Align::Left,
-                        )));
+                        obj.set_drawable(Box::new(over_text));
                     }
                 }
             });
 
-            // ── Restart on R ─────────────────────────────────────────────
             let st_restart = state.clone();
             canvas.on_key_press(move |c, key| {
                 let is_r = matches!(key, Key::Character(ch) if ch.as_str() == "r");
@@ -1033,9 +999,6 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
     scene
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// Fire helpers
-// ─────────────────────────────────────────────────────────────────────────────
 fn fire_player_laser(state: &Arc<Mutex<State>>, c: &mut Canvas) {
     let mut s = state.lock().unwrap();
     if s.fire_cooldown > 0 || s.game_over || s.paused { return; }
@@ -1078,9 +1041,6 @@ fn fire_enemy_laser(s: &mut State, c: &mut Canvas, ex: f32, ey: f32, angle: f32)
     }
 }
 
-// ─────────────────────────────────────────────────────────────────────────────
-// App entrypoint
-// ─────────────────────────────────────────────────────────────────────────────
 pub struct App;
 
 impl App {
