@@ -85,9 +85,11 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
         .size(PLAYER_W, PLAYER_H)
         .position(SPAWN_X - PLAYER_W / 2.0, SPAWN_Y - PLAYER_H / 2.0)
         .tag("player")
-        .gravity_target(PLANET_GRAVITY_TAG)
+        .all_gravity_sources()
+        .gravity_influence_mult(GRAVITY_FIELD_MULT)
         .auto_align()
-        .auto_align_speed(0.5)
+        .auto_align_speed(0.3)
+        .auto_align_min_depth(0.5)
         .resistance(PLAYER_RESISTANCE, PLAYER_RESISTANCE)
         .player_layer()
         .layer(5)
@@ -315,7 +317,8 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
             .position(dx, dy)
             .tag("debris")
             .momentum(vx, vy)
-            .gravity_target(PLANET_GRAVITY_TAG)
+            .all_gravity_sources()
+            .gravity_influence_mult(GRAVITY_FIELD_MULT)
             .collision_layer(collision_layers::DEFAULT)
             .collision_mask(collision_layers::PLAYER | collision_layers::PROJECTILE | collision_layers::TERRAIN | collision_layers::DEFAULT)
             .layer(3);
@@ -488,11 +491,11 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
 
             canvas.on_key_press(|c, key| {
                 match key {
-                    Key::Character(ch) if ch.as_str() == "z" => { c.run(Action::add_zoom(0.1)); }
+                    Key::Character(ch) if ch.as_str() == "z" => {
+                        c.smooth_zoom(c.get_zoom() + 0.2);
+                    }
                     Key::Character(ch) if ch.as_str() == "x" => {
-                        if c.camera().map_or(true, |cam| cam.zoom > 0.3) {
-                            c.run(Action::add_zoom(-0.1));
-                        }
+                        c.smooth_zoom((c.get_zoom() - 0.2).max(0.3));
                     }
                     _ => {}
                 }
@@ -506,8 +509,13 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
             
             let hud_font = Arc::new(
                 Font::from_bytes(
-                    &std::fs::read("assets/font.ttf").expect("font not found")
-                ).expect("invalid font")
+                    &std::fs::read(
+                        std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+                            .join("assets/font.ttf")
+                    )
+                    .expect("font not found")
+                )
+                .expect("invalid font")
             );
 
             let st_tick = state.clone();
@@ -873,26 +881,17 @@ fn build_game_scene(_ctx: &mut prism::Context) -> Scene {
                 }
 
                 if s.show_gravity_debug {
-                    let mut grav_lines: Vec<String> = Vec::new();
-                    for p in PLANETS {
-                        let dx = p.x - s.px;
-                        let dy = p.y - s.py;
-                        let dist = (dx * dx + dy * dy).sqrt();
-                        let field_r = p.radius * GRAVITY_FIELD_MULT;
-                        if dist < field_r {
-                            let frac = 1.0 - (dist / field_r).min(1.0);
-                            let force = p.strength * frac;
-                            let angle_deg = dy.atan2(dx).to_degrees();
-                            grav_lines.push(format!(
-                                "{}: F={:.2} dir={:.0}° d={:.0}",
-                                p.name, force, angle_deg, dist
-                            ));
-                        }
-                    }
-                    let grav_msg = if grav_lines.is_empty() {
+                    let dominant = c.get_dominant_planet("player")
+                        .unwrap_or("none");
+                    let in_range = c.planets_in_range("player");
+                    let grav_msg = if in_range.is_empty() {
                         "Gravity: none".to_string()
                     } else {
-                        grav_lines.join(" | ")
+                        format!(
+                            "Dominant: {} | In range: {}",
+                            dominant,
+                            in_range.join(", ")
+                        )
                     };
                     let grav_text = c.make_text(
                         grav_msg, 22.0, Color(180, 255, 180, 200), Align::Left, hud_font.clone(),
